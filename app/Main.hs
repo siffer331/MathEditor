@@ -1,7 +1,6 @@
 module Main (main) where
 
 import TypeTheory
-import Data.Maybe
 
 -- The following is a partial implementation of the formal type theory defined in appendix A.2 in the HoTT book.
 -- HoTT book: https://hott.github.io/book/hott-online-82-g578b85c.pdf
@@ -9,8 +8,8 @@ import Data.Maybe
 universe :: Type
 universe = Type { typeSize = 1, typeId = 0 }
 
-universeMinusOne :: Term
-universeMinusOne = Constant 0
+-- universeMinusOne :: Term
+-- universeMinusOne = Constant 0
 
 universeMinusOneOut :: TermOut
 universeMinusOneOut = ConstantOut 0
@@ -47,13 +46,13 @@ ctx_EMP = Rule { assumptions = [], conclusion = Ctx [] }
 ctx_EXT :: Rule
 ctx_EXT = Rule
   { assumptions = [ Membership [SubContextIn 0] (Generic 0) (universeTerm 1) ]
-  , conclusion = Ctx [SubContextOut 0, NewGeneric $ GenericOut 0]
+  , conclusion = Ctx [NewGeneric $ GenericOut 0, SubContextOut 0]
   }
 
 vble :: Rule
 vble = Rule
-  { assumptions = [Ctx [SubContextIn 1, SubContextIn 0]]
-  , conclusion = Membership [SubContextOut 1, SubContextOut 0] (SubContextHeadGeneric 1) (SubContextHeadTerm 1) }
+  { assumptions = [Ctx [SubContextIn 0, SubContextIn 1]]
+  , conclusion = Membership [SubContextOut 0, SubContextOut 1] (SubContextHeadGeneric 1) (SubContextHeadTerm 1) }
 
 pointType :: Type
 pointType = Type { typeSize = 0, typeId = 1 }
@@ -64,11 +63,11 @@ pointOut = InstanceOut { typeOfTerm = pointType, termParts = [] }
 point :: Term
 point = Instance { typeOf = pointType, instanceTerms = [] }
 
-pointElementOut :: TermOut
-pointElementOut = ConstantOut 1
+-- pointElementOut :: TermOut
+-- pointElementOut = ConstantOut 1
 
-pointElement :: Term
-pointElement = Constant 1
+-- pointElement :: Term
+-- pointElement = Constant 1
 
 -- point_INTRO :: Rule
 -- point_INTRO = Rule
@@ -78,24 +77,30 @@ pointElement = Constant 1
 point_FORM :: Rule
 point_FORM = Rule
   { assumptions = [Ctx [SubContextIn 0], universeAssumption 0 1]
-  , conclusion = Membership [SubContextOut 0] pointOut (universeTermOut 1)}
+  , conclusion = Membership [SubContextOut 0] pointOut (universeTermOut 1) }
 
 
 dependantType :: Type
 dependantType = Type { typeSize = 2, typeId = 2 }
 
 dependantOut :: Int -> TermOut -> TermOut -> TermOut
-dependantOut x a b = InstanceConsume {typeOfTerm = dependantType, termParts = [a, b], consumeId = x}
+dependantOut x a b = InstanceConsume { typeOfTerm = dependantType, termParts = [a, b], consumeId = x }
+
+dependant :: Term -> Term -> Term
+dependant a b = Instance { typeOf = dependantType, instanceTerms = [a, b] }
 
 functionType :: Type
 functionType = Type { typeSize = 2, typeId = 3 }
 
 functionOut :: Int -> TermOut -> TermOut -> TermOut
-functionOut x a b = InstanceConsume {typeOfTerm = functionType, termParts = [a, b], consumeId = x}
+functionOut x a b = InstanceConsume { typeOfTerm = functionType, termParts = [a, b], consumeId = x }
+
+function :: Term -> Term -> Term
+function a b = Instance { typeOf = functionType, instanceTerms = [a, b] }
 
 dependant_INTRO :: Rule
 dependant_INTRO = Rule
-  { assumptions = [ Membership [SubContextIn 0, OfTypeIn 0 (Generic 1)] (Generic 2) (Generic 3)]
+  { assumptions = [ Membership [OfTypeIn 0 (Generic 1), SubContextIn 0] (Generic 2) (Generic 3)]
   , conclusion = Membership
     [SubContextOut 0]
     (functionOut 0 (GenericOut 1) (GenericOut 2))
@@ -119,33 +124,40 @@ dependant_INTRO = Rule
 
 -- The following is an test of the derivation found on page 434 in the HoTT book.
 
-emptyCtx :: Judgement
-emptyCtx = fromJust $ apply ctx_EMP [] []
+emptyCtx :: Result Judgement
+emptyCtx = apply ctx_EMP [] []
 
-universeMinusOneJudgement :: Judgement
-universeMinusOneJudgement = fromJust $ apply universe_BASE [] []
+universeMinusOneJudgement :: Result Judgement
+universeMinusOneJudgement = apply universe_BASE [] []
 
-universe0Judgement :: Judgement
-universe0Judgement = fromJust $ apply universe_INTRO [] [universeMinusOneJudgement]
+universe0Judgement :: Result Judgement
+universe0Judgement = apply universe_INTRO [] =<< sequence [universeMinusOneJudgement]
 
-pointJudgement :: Judgement
-pointJudgement = fromJust $ apply point_FORM [] [emptyCtx, universe0Judgement]
+pointJudgement :: Result Judgement
+pointJudgement = apply point_FORM [] =<< sequence [emptyCtx, universe0Judgement]
 
-pointVariableCtx :: Judgement
-pointVariableCtx = fromJust $ apply ctx_EXT [] [pointJudgement]
+pointVariableCtx :: Result Judgement
+pointVariableCtx = apply ctx_EXT [] =<< sequence [pointJudgement]
 
-pointVariableJudgement :: Judgement -- TODO this does not work. Debug
-pointVariableJudgement = fromJust $ apply vble [0] [pointVariableCtx]
+pointVariableJudgement :: Result Judgement
+pointVariableJudgement = apply vble [0] =<< sequence [pointVariableCtx]
 
-pointIdFunctionJudgement :: Judgement
-pointIdFunctionJudgement = fromJust $ apply dependant_INTRO [] [pointVariableJudgement]
+pointIdFunctionJudgement :: Result Judgement
+pointIdFunctionJudgement = apply dependant_INTRO [] =<< sequence [pointVariableJudgement]
+
+pointIdFunctionTypeArtificial :: Term
+pointIdFunctionTypeArtificial = dependant point point
+
+pointIdFunctionTermArtificial :: Term
+pointIdFunctionTermArtificial = function point $ Internal 0
 
 main :: IO ()
-main = putStrLn $ if pointVariableCtx == Ctx [point] then "Good" else "Bad"
+main = putStrLn $
+  if pointIdFunctionJudgement == Right (Membership [] pointIdFunctionTermArtificial pointIdFunctionTypeArtificial)
+  then "Good" else "Bad"
 
 -- TODO tests
--- apply emptyCtx == Ctx []
+-- emptyCtx == Right (Ctx [])
+-- pointVariableCtx == Right (Ctx [point])
 
 -- TODO call Types for Constructs
-
--- TODO error instead of Maybe

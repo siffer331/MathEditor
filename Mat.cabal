@@ -18,6 +18,9 @@ executable Mat
 
     main-is:          Main.hs
 
+    other-modules:
+        TypeTheory
+
     build-depends:
         base ^>=4.20.2.0
       -- , monomer ^>=1.6.0.1
