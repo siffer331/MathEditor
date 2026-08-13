@@ -1,6 +1,7 @@
 module Main (main) where
 
 import TypeTheory
+import UI
 
 -- The following is a partial implementation of the formal type theory defined in appendix A.2 in the HoTT book.
 -- HoTT book: https://hott.github.io/book/hott-online-82-g578b85c.pdf
@@ -151,10 +152,12 @@ pointIdFunctionTypeArtificial = dependant point point
 pointIdFunctionTermArtificial :: Term
 pointIdFunctionTermArtificial = function point $ Internal 0
 
+-- main :: IO ()
+-- main = putStrLn $
+--   if pointIdFunctionJudgement == Right (Membership [] pointIdFunctionTermArtificial pointIdFunctionTypeArtificial)
+--   then "Good" else "Bad"
 main :: IO ()
-main = putStrLn $
-  if pointIdFunctionJudgement == Right (Membership [] pointIdFunctionTermArtificial pointIdFunctionTypeArtificial)
-  then "Good" else "Bad"
+main = startUI
 
 -- TODO tests
 -- emptyCtx == Right (Ctx [])
