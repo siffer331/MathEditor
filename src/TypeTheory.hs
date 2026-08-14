@@ -9,13 +9,14 @@ module TypeTheory
   , Context
   , ContextPartIn (..)
   , ContextPartOut (..)
+  , ContextIn
+  , ContextOut
   , TermOut (..)
   , Error (..)
   , Result
   , apply
-) where
+  ) where
 
-import Data.List
 import Control.Monad
 
 data Type = Type { typeSize :: Int, typeId :: Int } deriving Show
@@ -62,7 +63,7 @@ type JudgementOut = JudgementType ContextOut TermOut
 
 data Rule = Rule {assumptions :: [JudgementIn], conclusion :: JudgementOut} deriving (Show, Eq)
 
-apply :: Rule -> [Int] -> [Judgement] -> Result Judgement
+apply :: Rule -> [(Int, Int)] -> [Judgement] -> Result Judgement
 apply rule lengths contexts = do
   termLookup <- collectJudgements lengths (assumptions rule) contexts
   createJudgement termLookup $ conclusion rule
@@ -156,12 +157,12 @@ consumeTerm depth termId (Instance {typeOf = termType, instanceTerms = terms})
 consumeTerm _ _ (Constant x) = Constant x
 consumeTerm _ _ (Internal x) = Internal x
 
-collectJudgements :: [Int] -> [JudgementIn] -> [Judgement] -> Result TermLookup
+collectJudgements :: [(Int, Int)] -> [JudgementIn] -> [Judgement] -> Result TermLookup
 collectJudgements lengths = join .: (
   fmap (mergeTermLookup . foldl combineTermLookup emptyLookup)
   .: (sequence .: zipWith (collectJudgement lengths)))
 
-collectJudgement :: [Int] -> JudgementIn -> Judgement -> Result TermLookup
+collectJudgement :: [(Int, Int)] -> JudgementIn -> Judgement -> Result TermLookup
 collectJudgement lengths (Ctx ctxIn) (Ctx ctx) = collectContext lengths ctxIn ctx
 collectJudgement lengths (Membership ctxIn termAIn termBIn) (Membership ctx termA termB)
   = let terms = [collectContext lengths ctxIn ctx, collectTermFull termAIn termA, collectTermFull termBIn termB]
@@ -174,12 +175,12 @@ collectJudgement lengths (DefEq ctxIn termAIn termBIn termCIn) (DefEq ctx termA 
     in foldl1 combineTermLookup <$> sequence terms
 collectJudgement _ a b = Left $ IncompatibleJudgements a b
 
-collectContext :: [Int] -> ContextIn -> Context -> Result TermLookup
+collectContext :: [(Int, Int)] -> ContextIn -> Context -> Result TermLookup
 collectContext _ [] [] = Right ([], [])
 collectContext _ [] (x : _) = Left $ UnconsumedTerm x
 collectContext _ [SubContextIn x] ctx = Right ([(x, (0, ctx))], [])
 collectContext lengths (SubContextIn x : ctxIn) ctx = do
-  len <- toResult (SubContextLengthUnspecified x) $ lengths !? x
+  len <- toResult (SubContextLengthUnspecified x) $ lookup x lengths
   let actualLength = length ctx
   _ <- assertResult (MissingTermsForSubContext x $ actualLength - len) $ actualLength >= len
   let (ctxA, ctxB) = splitAt len ctx

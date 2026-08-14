@@ -20,6 +20,7 @@ executable Mat
 
     other-modules:
         TypeTheory
+      , TypeTheoryExamples
       , UI
 
     build-depends:

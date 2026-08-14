@@ -3,6 +3,9 @@ words = [
     "fmap",
     "foldl",
     "fst",
+    "hstack",
+    "newtype",
     "snd",
     "vble",
+    "vstack",
 ]
