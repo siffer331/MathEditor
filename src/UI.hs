@@ -8,37 +8,42 @@ import TypeTheoryExamples
 import Control.Lens
 import Data.Maybe
 import Data.List
-import Data.Text (Text, pack)
+import Data.Text (Text)
 import Monomer
 import TextShow
-
-import qualified Monomer.Lens as L
-
-newtype AppModel = AppModel
-  { _clickCount :: Int
-  } deriving (Eq, Show)
-
-data AppEvent
-  = AppInit
-  | AppIncrease
-  deriving (Eq, Show)
-
-makeLenses 'AppModel
+import Colors
+import UIData
+import Util
 
 type AppNode = WidgetNode AppModel AppEvent
 type AppEnv = WidgetEnv AppModel AppEvent
 
+focusKeys :: [(Text, AppEvent)]
+focusKeys = (\(a, b) -> (a, AppMoveFocus b)) <$>
+  [ ("Enter", FocusEnter)
+  , ("Space", FocusEnter)
+  , ("Esc", FocusExit)
+  , ("h", FocusLeft)
+  , ("Left", FocusLeft)
+  , ("j", FocusDown)
+  , ("Down", FocusDown)
+  , ("k", FocusUp)
+  , ("Up", FocusUp)
+  , ("l", FocusRight)
+  , ("Right", FocusRight)
+  ]
+
 buildUI :: AppEnv -> AppModel -> AppNode
-buildUI _ _ = widgetTree where
-  widgetTree = vstack
+buildUI _ model = widgetTree where
+  widgetTree = keystroke focusKeys $ vstack
     [ filler
     , hstack
       [ filler
-      , displayRule visual_subst1
+      , displayRule (model ^. appRuleVisual) $ model ^. appSelection
       , filler
       ]
     , filler
-    ] `styleBasic` [bgColor $ rgbHex "#1e1e2e", textSize 24]
+    ] `styleBasic` [bgColor colorBase, textSize 24]
 
 handleEvent
   :: WidgetEnv AppModel AppEvent
@@ -48,7 +53,8 @@ handleEvent
   -> [AppEventResponse AppModel AppEvent]
 handleEvent _ _ model evt = case evt of
   AppInit -> []
-  AppIncrease -> [Model (model & clickCount +~ 1)]
+  AppMoveFocus move -> [Model $ over appSelection (moveFocusRule (visualRule $ model ^. appRuleVisual) move) model ]
+  -- AppIncrease -> [Model (model & clickCount +~ 1)]
 
 startUI :: IO ()
 startUI = do
@@ -59,24 +65,28 @@ startUI = do
       appWindowIcon "./assets/images/icon.png",
       appTheme darkTheme,
       appFontDef "Regular" "./assets/fonts/lmmath-regular.otf",
-      -- appFontDef "Regular" "./assets/fonts/Roboto-Regular.ttf",
       appInitEvent AppInit
       ]
-    model = AppModel 0
+    model = AppModel SelectionWhole visual_subst1
 
-displayRule :: RuleVisual -> AppNode
-displayRule visual = hstack
+styleSelect :: Bool -> StyleState
+styleSelect x = styleIf x $ bgColor colorSurface1
+
+displayRule :: RuleVisual -> Selection RuleSelection -> AppNode
+displayRule visual selection = hstack
   [ vstack
-    [ (`styleBasic` [paddingH 10, paddingV 5]) $
-      hstack $ intersperse (spacer_ [width 30]) $ displayJudgement (displayContextPartIn visual) (displayTerm visual)
-        <$> assumptions (visualRule visual)
+    [ (flip styleBasic [paddingH 10, paddingV 5]) $
+      hstack (intersperse (spacer_ [width 30]) $ 
+        (\i judgement -> displayJudgement (displayContextPartIn visual) (displayTerm visual) judgement
+          `styleBasic` [styleSelect $ selection == SelectionSub (SelectionAssumption i SelectionWhole)])
+        <||> assumptions (visualRule visual))
     , separatorLine
-    , (`styleBasic` [paddingH 10, paddingV 5]) $
+    , (flip styleBasic [paddingH 10, paddingV 5, styleSelect $ selection == SelectionSub (SelectionConclusion SelectionWhole)]) $
       displayJudgement (displayContextPartOut visual) (displayTermOut visual) $ conclusion $ visualRule visual
     ]
   , spacer
   , label (visualName visual) `styleBasic` [textCenter]
-  ]
+  ] `styleBasic` [padding 5, styleSelect $ selection == SelectionWhole]
 
 displayJudgement :: (ctx -> AppNode) -> (term -> AppNode) -> JudgementType [ctx] term -> AppNode
 displayJudgement ctxF _ (Ctx ctx) = hstack [displayContext ctxF ctx, label " ctx" ]
@@ -119,22 +129,22 @@ displayTerm visual (Generic x) = getGenericLabel visual x
 displayTerm visual (Instance {typeOf = termType, instanceTerms = terms} ) = hstack $ concat -- TODO
   [ [label "("]
   , intersperse (label ", ") $ displayTerm visual <$> terms
-  , [label $ pack $ " : " ++ (show $ typeId termType) ++ ")"]
+  , [label $ " : " <> (showt $ typeId termType) <> ")"]
   ]
-displayTerm _ (Constant x) = label $ pack $ "Const " ++ show x
-displayTerm _ (Internal x) = label $ pack $ "Internal " ++ show x
+displayTerm _ (Constant x) = label $ "Const " <> showt x
+displayTerm _ (Internal x) = label $ "Internal " <> showt x
 
 displayTermOut :: RuleVisual -> TermOut -> AppNode
 displayTermOut visual (GenericOut x) = getGenericLabel visual x
 displayTermOut visual (InstanceOut {typeOfTerm = termType, termParts = terms} ) = hstack $ concat -- TODO
   [ [label "("]
   , intersperse (label ", ") $ displayTermOut visual <$> terms
-  , [label $ pack $ " : " ++ (show $ typeId termType) ++ ")"]
+  , [label $ " : " <> (showt $ typeId termType) <> ")"]
   ]
 displayTermOut visual (InstanceConsume {typeOfTerm = termType, termParts = terms} ) = hstack $ concat -- TODO
   [ [label "("]
   , intersperse (label ", ") $ displayTermOut visual <$> terms
-  , [label $ pack $ " : " ++ (show $ typeId termType) ++ ")"]
+  , [label $ " : " <> (showt $ typeId termType) <> ")"]
   ]
 displayTermOut visual (GenericReplace {genericId = x, termReplacingTerm = term, termReplacedId = y})
   = hstack
@@ -145,7 +155,7 @@ displayTermOut visual (GenericReplace {genericId = x, termReplacingTerm = term, 
     , getGenericLabel visual y
     , label "]"
     ]
-displayTermOut _ (ConstantOut x) = label $ pack $ "Const " ++ show x
+displayTermOut _ (ConstantOut x) = label $ "Const " <> showt x
 displayTermOut visual (SubContextHeadTerm x) = hstack
   [ label $ (displayToken x $ visualSubContextSymbols visual)
   , label "[T]"
@@ -155,8 +165,8 @@ displayTermOut visual (SubContextHeadGeneric x) = hstack
   , label "[t]"
   ]
 
-visual_ctx_EMP :: RuleVisual
-visual_ctx_EMP = RuleVisual
+_visual_ctx_EMP :: RuleVisual
+_visual_ctx_EMP = RuleVisual
   { visualRule = ctx_EMP
   , visualGenericSymbols = []
   , visualSubContextSymbols = []
@@ -169,18 +179,12 @@ visual_subst1 = RuleVisual
   , visualSubContextSymbols = [(0, "Γ"), (1, "∆")]
   , visualName = "Subst1" }
 
-visual_eqReflex :: RuleVisual
-visual_eqReflex = RuleVisual
+_visual_eqReflex :: RuleVisual
+_visual_eqReflex = RuleVisual
   { visualRule = eqReflex
   , visualGenericSymbols = [(0, "a"), (1, "A")]
   , visualSubContextSymbols = [(0, "Γ")]
   , visualName = "Eq Reflexive" }
-
-data RuleVisual = RuleVisual
-  { visualRule :: Rule
-  , visualGenericSymbols :: [(Int, Text)]
-  , visualSubContextSymbols :: [(Int, Text)]
-  , visualName :: Text }
 
 getGenericLabel :: RuleVisual -> Int -> AppNode
 getGenericLabel visual x = label $ displayToken x $ visualGenericSymbols visual
@@ -189,7 +193,31 @@ getSubContextLabel :: RuleVisual -> Int -> AppNode
 getSubContextLabel visual x = label $ displayToken x $ visualSubContextSymbols visual
 
 displayToken :: Int -> [(Int, Text)] -> Text
-displayToken x = fromMaybe (pack $ show x) . lookup x
+displayToken x = fromMaybe (showt x) . lookup x
+
+moveFocusRule :: Rule -> MoveFocus -> Selection RuleSelection -> Selection RuleSelection
+moveFocusRule _ FocusEnter SelectionWhole = SelectionSub $ SelectionAssumption 0 SelectionWhole
+moveFocusRule _ FocusExit (SelectionSub (SelectionAssumption _ SelectionWhole)) = SelectionWhole
+moveFocusRule _ FocusLeft (SelectionSub (SelectionAssumption x SelectionWhole))
+  = SelectionSub $ SelectionAssumption (max 0 $ x - 1) SelectionWhole
+moveFocusRule rule FocusRight (SelectionSub (SelectionAssumption x SelectionWhole))
+  = SelectionSub $ SelectionAssumption (min (length (assumptions rule) - 1) $ x + 1) SelectionWhole
+moveFocusRule _ FocusExit (SelectionSub (SelectionConclusion SelectionWhole)) = SelectionWhole
+moveFocusRule _ FocusDown (SelectionSub (SelectionAssumption _ SelectionWhole))
+  = SelectionSub $ SelectionConclusion SelectionWhole
+moveFocusRule _ FocusUp (SelectionSub (SelectionConclusion SelectionWhole))
+  = SelectionSub $ SelectionAssumption 0 SelectionWhole
+moveFocusRule _ FocusEnter (SelectionSub (SelectionAssumption x SelectionWhole))
+  = SelectionSub $ SelectionAssumption x $ SelectionSub $ SelectionCtx SelectionWhole
+moveFocusRule _ FocusEnter (SelectionSub (SelectionConclusion SelectionWhole))
+  = SelectionSub $ SelectionConclusion $ SelectionSub $ SelectionCtx SelectionWhole
+moveFocusRule _ _ selection = selection
+
+moveFocusJudgement :: Judgement -> MoveFocus -> Selection (JudgementSelection a b) -> Selection (JudgementSelection a b)
+moveFocusJudgement = undefined
 
 
-data JudgementSelection = SelectionAssumption Int | SelectionConclusion
+
+
+
+

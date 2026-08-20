@@ -18,6 +18,7 @@ module TypeTheory
   ) where
 
 import Control.Monad
+import Util
 
 data Type = Type { typeSize :: Int, typeId :: Int } deriving Show
 
@@ -44,10 +45,7 @@ data TermOut
   | SubContextHeadGeneric Int
   deriving (Show, Eq)
 
-data ContextPartIn
-  = OfTypeIn Int Term
-  | SubContextIn Int
-  deriving (Show, Eq)
+data ContextPartIn = OfTypeIn Int Term | SubContextIn Int deriving (Show, Eq)
 
 data ContextPartOut
   = NewGeneric TermOut
@@ -111,7 +109,7 @@ createContext :: TermLookup -> ContextOut -> Result Context
 createContext _ [] = Right []
 createContext terms (NewGeneric term : xs) = (:) <$> createTerm terms term <*> createContext terms xs
 createContext terms (SubContextOut x : xs) = (++) . snd <$> lookupSubContext x terms <*> createContext terms xs
-createContext terms (SubContextReplace { contextId = x, ctxReplacingTerm = term, ctxReplacedId = termId } : xs) = do
+createContext terms (SubContextReplace x term termId : xs) = do
   (from, subCtx) <- lookupSubContext x terms
   replacedSubContext <- (flip fmap subCtx) <$> (replaceTerm termId <$> createTerm terms term)
   ctx <- createContext terms xs
@@ -122,38 +120,34 @@ moveContext from to = sequence . fmap (moveTerm from to)
 
 moveTerm :: Int -> Int -> Term -> Result Term
 moveTerm from to (Generic x) = if x < from && x > to then Left $ MissingTermInOutput x else Right (Generic x)
-moveTerm from to (Instance { typeOf = termType, instanceTerms = terms })
-  = (\x -> Instance {typeOf = termType, instanceTerms = x}) <$> sequence (moveTerm from to <$> terms)
+moveTerm from to (Instance termType terms) = (\x -> Instance termType x) <$> sequence (moveTerm from to <$> terms)
 moveTerm _ _ (Constant x) = Right $ Constant x
 moveTerm _ _ (Internal x) = Right $ Internal x
 
 createTerm :: TermLookup -> TermOut -> Result Term
 createTerm terms (GenericOut x) = lookupTerm x terms
-createTerm terms (InstanceOut { typeOfTerm = termType, termParts = parts }) = do
+createTerm terms (InstanceOut termType parts ) = do
   _ <- assertResult (IncorrectTypeInputsOut termType parts) $ (typeSize termType) == (length parts)
   newParts <- sequence $ createTerm terms <$> parts
-  return $ Instance { typeOf = termType, instanceTerms = newParts }
-createTerm  terms (InstanceConsume { typeOfTerm = termType, termParts = parts, consumeId = x }) = do
+  return $ Instance termType newParts
+createTerm  terms (InstanceConsume termType parts x) = do
   _ <- assertResult (IncorrectTypeInputsOut termType parts) $ (typeSize termType) == (length parts)
   newParts <- sequence $ createTerm terms <$> parts
-  return $ Instance { typeOf = termType, instanceTerms = consumeTerm 0 x <$> newParts }
-createTerm  terms (GenericReplace {genericId = x, termReplacingTerm = term, termReplacedId = termId})
-  = replaceTerm termId <$> createTerm terms term <*> lookupTerm x terms
+  return $ Instance termType (consumeTerm 0 x <$> newParts)
+createTerm  terms (GenericReplace x term termId) = replaceTerm termId <$> createTerm terms term <*> lookupTerm x terms
 createTerm  terms (SubContextHeadTerm x) = headResult (UnexpectedEmptySubContext x) =<< snd <$> lookupSubContext x terms
 createTerm  terms (SubContextHeadGeneric x) = Generic . (+(-1)) . length . snd <$> lookupSubContext x terms -- TODO Now only supports head of first sub context
 createTerm _ (ConstantOut x) = Right $ Constant x
 
 replaceTerm :: Int -> Term -> Term -> Term
 replaceTerm termId term (Generic x) = if x == termId then term else Generic x
-replaceTerm termId term (Instance {typeOf = termType, instanceTerms = terms})
-  = Instance { typeOf = termType, instanceTerms = replaceTerm termId term <$> terms}
+replaceTerm termId term (Instance termType terms) = Instance termType (replaceTerm termId term <$> terms)
 replaceTerm _ _ (Constant x) = Constant x
 replaceTerm _ _ (Internal x) = Internal x
 
 consumeTerm :: Int -> Int -> Term -> Term
 consumeTerm depth termId (Generic x) = if x == termId then Internal depth else Generic x
-consumeTerm depth termId (Instance {typeOf = termType, instanceTerms = terms})
-  = Instance { typeOf = termType, instanceTerms = consumeTerm (depth + 1) termId <$> terms}
+consumeTerm depth termId (Instance termType terms) = Instance termType (consumeTerm (depth + 1) termId <$> terms)
 consumeTerm _ _ (Constant x) = Constant x
 consumeTerm _ _ (Internal x) = Internal x
 
@@ -198,7 +192,7 @@ collectTermFull x y = (\a -> ([], a)) <$> collectTerm x y
 collectTerm :: Term -> Term -> Result [(Int, Term)]
 collectTerm (Generic x) term = Right [(x, term)]
 collectTerm (Constant x) (Constant y) = if x == y then Left $ WrongConstant x y else Right []
-collectTerm (Instance {typeOf = type1, instanceTerms = termsFormat}) (Instance {typeOf = type2, instanceTerms = termsIn}) = do
+collectTerm (Instance type1 termsFormat) (Instance type2 termsIn) = do
   _ <- assertResult (IncompatibleType type1 type2) $ type1 == type2
   _ <- assertResult (IncorrectTypeInputs type1 termsFormat) $ typeSize type1 == length termsFormat
   _ <- assertResult (IncorrectTypeInputs type1 termsIn) $ typeSize type1 == length termsIn
@@ -208,12 +202,6 @@ collectTerm a b = Left $ IncompatibleTerms a b
 assertResult :: Error -> Bool -> Result ()
 assertResult _ True = Right ()
 assertResult err False = Left err
-
-(.:) :: (c -> d) -> (a -> b -> c) -> a -> b -> d
-(.:) f g a b = f $ g a b
-
-(??) :: Functor f => f (a -> b) -> a -> f b
-(??) ff x = (\f -> f x) <$> ff
 
 headResult :: Error -> [a] -> Result a
 headResult _ (x : _) = Right x

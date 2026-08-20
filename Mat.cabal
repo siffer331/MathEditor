@@ -22,6 +22,9 @@ executable Mat
         TypeTheory
       , TypeTheoryExamples
       , UI
+      , UIData
+      , Util
+      , Colors
 
     build-depends:
         base ^>=4.20.2.0

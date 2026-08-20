@@ -1,10 +1,12 @@
 words = [
     "ctxs",
+    "esc",
     "fmap",
     "foldl",
     "fst",
     "hstack",
     "newtype",
+    "showt",
     "snd",
     "vble",
     "vstack",
